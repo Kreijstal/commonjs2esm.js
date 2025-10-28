@@ -161,6 +161,15 @@ After converting your module, you can use it directly in the browser:
 </script>
 ```
 
+### Live Browser Demo
+
+Check out the [browser demo](./examples/demo.html) to see the tool in action! The demo shows:
+- Cross-platform file reading (filesystem in Node.js, HTTP fetch in browser)
+- Environment detection
+- Working with ESM modules in the browser
+
+![Browser Demo](https://github.com/user-attachments/assets/14491b2e-8fc7-4f07-b657-864ca3863197)
+
 ## Testing
 
 ```bash
