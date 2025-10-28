@@ -31,6 +31,7 @@ The converted module can now be used in the browser:
   import { loadConfig, joinPaths } from './example-module.esm.js';
   
   // The module works in the browser!
+  // Note: Paths are relative to the HTML file location
   const config = await loadConfig('./config.json');
   console.log(config);
 </script>
@@ -49,7 +50,7 @@ console.log(config);
 
 ## Key Features
 
-1. **No bundling required**: Dependencies are loaded from esm.sh
+1. **No bundling of external dependencies**: External npm packages are loaded from esm.sh CDN
 2. **Cross-platform**: Same code works in Node.js and browsers
 3. **Minimal changes**: Original code structure is preserved
 4. **Runtime helpers**: Functions like `readFile()` adapt to the environment
