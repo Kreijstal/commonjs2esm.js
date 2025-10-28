@@ -101,8 +101,8 @@ export function transformCommonJsToEsm(code, options = {}) {
   );
   
   // 3. Add runtime imports if needed
-  if (includeRuntime && (code.includes('readFile') || code.includes('writeFile'))) {
-    imports.add("import { readFile, writeFile, fileExists } from './runtime.js';");
+  if (includeRuntime && /\b(readFile|writeFile|fileExists|loadSqliteModule)\b/.test(code)) {
+    imports.add("import { readFile, writeFile, fileExists, loadSqliteModule } from './runtime.js';");
   }
   
   // 4. Combine imports with the transformed code

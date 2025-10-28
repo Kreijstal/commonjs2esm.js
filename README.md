@@ -125,6 +125,26 @@ import { fileExists } from 'commonjs2esm';
 const exists = await fileExists('./config.json');
 ```
 
+### `loadSqliteModule(options)`
+
+Loads the correct SQLite implementation for the current environment:
+
+```javascript
+import { loadSqliteModule } from 'commonjs2esm';
+
+const sqlite = await loadSqliteModule();
+if (sqlite.driver === 'node-sqlite3') {
+  // Running in Node.js
+} else {
+  // Running in the browser with sql.js
+}
+```
+
+By default Node.js uses the native `sqlite3` bindings while the browser loads
+the WebAssembly-powered `sql.js` package. You can pass custom loader functions
+through `options.nodeLoader` or `options.browserLoader` if you need to supply
+your own adapters.
+
 ### Environment Detection
 
 ```javascript

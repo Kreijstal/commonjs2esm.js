@@ -62,7 +62,7 @@ exports.load = load;
 `;
     const output = transformCommonJsToEsm(input, { includeRuntime: true });
     
-    assert.match(output, /import \{ readFile, writeFile, fileExists \} from '\.\/runtime\.js';/);
+    assert.match(output, /import \{ readFile, writeFile, fileExists, loadSqliteModule \} from '\.\/runtime\.js';/);
   });
   
   it('should handle multiple require statements', () => {
@@ -81,7 +81,22 @@ const util = require('util');
   it('should convert module.exports = function to default export', () => {
     const input = `module.exports = function myFunc() { return true; }`;
     const output = transformCommonJsToEsm(input, { includeRuntime: false });
-    
+
     assert.match(output, /export default function myFunc/);
+  });
+
+  it('should include runtime import when loadSqliteModule is used', () => {
+    const input = `
+async function openDb() {
+  const sqlite = await loadSqliteModule();
+  return sqlite.driver;
+}
+
+exports.openDb = openDb;
+`;
+    const output = transformCommonJsToEsm(input, { includeRuntime: true });
+
+    assert.match(output, /import \{ readFile, writeFile, fileExists, loadSqliteModule \} from '\.\/runtime\.js';/);
+    assert.match(output, /export const openDb = openDb;/);
   });
 });
