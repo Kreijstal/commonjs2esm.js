@@ -234,25 +234,29 @@ Check out the [browser demo](./examples/demo.html) to see the tool in action! Th
 ### Generate a browser-friendly `commonjs2esm.js`
 
 If you want to exercise the library directly in the browser (for example via
-`import("./commonjs2esm.js")`), first materialise the entry module by running
-the CLI against the package's own source. From the repository root:
+`import("./commonjs2esm.js")`), use the helper CLI to materialise the entry
+module and its runtime dependencies in your current working directory:
 
 ```bash
 # Install dependencies if you haven't already
 npm install
 
-# Convert the ESM entrypoint to a single browser-loadable module
-npx commonjs2esm ./src/index.js ./commonjs2esm.js
+# Generate commonjs2esm.js, runtime.js and transformer.js beside one another
+npx commonjs2esm-build-browser
+# Or, if you prefer an npm script
+npm run build:browser
 ```
 
-The command writes `commonjs2esm.js` into the current directory so it can be
-served like any other static asset.
+The command writes the browser-ready `commonjs2esm.js` together with the
+companion `runtime.js` and `transformer.js` files. Make sure all three are
+served so the module graph resolves correctly in the browser.
 
 ### Serve the project locally for manual browser testing
 
-With `commonjs2esm.js` generated, start a static HTTP server from the project
-root. Any simple server works; for example, using Node's `http-server`
-utility:
+With the browser bundle generated, start a static HTTP server from the
+directory that now contains `commonjs2esm.js`, `runtime.js` and
+`transformer.js`. Any simple server works; for example, using Node's
+`http-server` utility from the project root after running the generator:
 
 ```bash
 npx http-server .
@@ -260,7 +264,9 @@ npx http-server .
 
 Then open [`http://localhost:8080`](http://localhost:8080) in your browser and
 load a page that performs `import("./commonjs2esm.js")` to verify the runtime
-behaves as expected.
+behaves as expected. The runtime automatically pulls `sql.js` from
+[`https://esm.sh`](https://esm.sh/) when running in the browser, so no
+additional bundling step is required.
 
 ## Testing
 

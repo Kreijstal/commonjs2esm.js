@@ -6,9 +6,11 @@
   "type": "module",
   "bin": {
     "commonjs2esm": "./bin/cli.js",
-    "commonjs2esm-create-db": "./bin/create-test-db.js"
+    "commonjs2esm-create-db": "./bin/create-test-db.js",
+    "commonjs2esm-build-browser": "./bin/build-browser-entry.js"
   },
   "scripts": {
+    "build:browser": "node ./bin/build-browser-entry.js",
     "test": "npm run test:node && npm run test:playwright",
     "test:node": "node --test test/*.test.js",
     "test:playwright": "playwright test"

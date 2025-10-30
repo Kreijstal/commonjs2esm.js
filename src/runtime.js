@@ -21,6 +21,16 @@ const isBrowser = environmentOverride === 'browser'
     : typeof window !== 'undefined' &&
       typeof window.document !== 'undefined';
 
+const SQL_JS_CDN_SPECIFIER = 'https://esm.sh/sql.js';
+
+async function dynamicImport(specifier) {
+  const hook = globalThis.__COMMONJS2ESM_IMPORT_HOOK__;
+  if (typeof hook === 'function') {
+    return await hook(specifier);
+  }
+  return import(specifier);
+}
+
 /**
  * Read a file from the filesystem (Node.js) or fetch from network (browser)
  * @param {string} filepath - Path to the file
@@ -29,7 +39,7 @@ const isBrowser = environmentOverride === 'browser'
 export async function readFile(filepath) {
   if (isNode) {
     // In Node.js, read from filesystem
-    const fs = await import('fs/promises');
+    const fs = await dynamicImport('fs/promises');
     return await fs.readFile(filepath, 'utf-8');
   } else if (isBrowser) {
     // In browser, fetch from network
@@ -50,7 +60,7 @@ export async function readFile(filepath) {
  */
 export async function writeFile(filepath, content) {
   if (isNode) {
-    const fs = await import('fs/promises');
+    const fs = await dynamicImport('fs/promises');
     await fs.writeFile(filepath, content, 'utf-8');
   } else {
     throw new Error('writeFile is only supported in Node.js environment');
@@ -64,7 +74,7 @@ export async function writeFile(filepath, content) {
  */
 export async function fileExists(filepath) {
   if (isNode) {
-    const fs = await import('fs/promises');
+    const fs = await dynamicImport('fs/promises');
     try {
       await fs.access(filepath);
       return true;
@@ -102,7 +112,7 @@ export async function loadSqliteModule(options = {}) {
     if (typeof nodeLoader === 'function') {
       return await nodeLoader();
     }
-    const module = await import('sqlite3');
+    const module = await dynamicImport('sqlite3');
     return module?.default ?? module;
   }
 
@@ -110,7 +120,7 @@ export async function loadSqliteModule(options = {}) {
     if (typeof browserLoader === 'function') {
       return await browserLoader();
     }
-    const module = await import('sql.js');
+    const module = await dynamicImport(SQL_JS_CDN_SPECIFIER);
     return module?.default ?? module;
   }
 
@@ -169,7 +179,9 @@ async function loadSqlJsInstance(options = {}) {
     return customModule;
   }
 
-  const imported = await import('sql.js');
+  const imported = await dynamicImport(
+    isBrowser ? SQL_JS_CDN_SPECIFIER : 'sql.js',
+  );
   const initSqlJs = imported.default ?? imported;
   if (initSqlJs && typeof initSqlJs.Database === 'function') {
     return initSqlJs;
@@ -236,7 +248,7 @@ export async function sqliteToJson(source, options = {}) {
 
   if (typeof source === 'string') {
     if (isNode) {
-      const fs = await import('fs/promises');
+      const fs = await dynamicImport('fs/promises');
       const fileData = await fs.readFile(source);
       return sqliteToJson(new Uint8Array(fileData), options);
     }
