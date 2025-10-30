@@ -117,4 +117,166 @@ export async function loadSqliteModule(options = {}) {
   throw new Error('Unsupported environment for loadSqliteModule');
 }
 
+function isSqlJsDatabase(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.exec === 'function' &&
+    typeof value.export === 'function'
+  );
+}
+
+function normalizeSqliteInput(source) {
+  if (source instanceof Uint8Array) {
+    return source;
+  }
+
+  if (source instanceof ArrayBuffer) {
+    return new Uint8Array(source);
+  }
+
+  if (ArrayBuffer.isView(source)) {
+    return new Uint8Array(
+      source.buffer,
+      source.byteOffset,
+      source.byteLength,
+    );
+  }
+
+  return null;
+}
+
+async function loadSqlJsInstance(options = {}) {
+  const { locateFile, moduleLoader } = options;
+
+  const effectiveLocateFile =
+    typeof locateFile === 'function'
+      ? locateFile
+      : isBrowser
+        ? (file) => `https://sql.js.org/dist/${file}`
+        : undefined;
+
+  const loaderConfig = effectiveLocateFile ? { locateFile: effectiveLocateFile } : undefined;
+
+  if (typeof moduleLoader === 'function') {
+    const customModule = await moduleLoader(loaderConfig);
+    if (customModule && typeof customModule.Database === 'function') {
+      return customModule;
+    }
+    if (typeof customModule === 'function') {
+      return await customModule(loaderConfig ?? {});
+    }
+    return customModule;
+  }
+
+  const imported = await import('sql.js');
+  const initSqlJs = imported.default ?? imported;
+  if (initSqlJs && typeof initSqlJs.Database === 'function') {
+    return initSqlJs;
+  }
+  if (typeof initSqlJs === 'function') {
+    const config = loaderConfig ?? {};
+    return await initSqlJs(config);
+  }
+  throw new Error('Unable to load sql.js module');
+}
+
+function execToObjects(result) {
+  if (!result || result.length === 0) {
+    return [];
+  }
+
+  const { columns, values } = result[0];
+  return values.map((row) => {
+    const entry = {};
+    for (let i = 0; i < columns.length; i += 1) {
+      entry[columns[i]] = row[i];
+    }
+    return entry;
+  });
+}
+
+function sanitizeTableName(name) {
+  return name.replace(/"/g, '""');
+}
+
+async function fetchTableNames(database, tables) {
+  const query =
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+  const result = database.exec(query);
+  const available = new Set(execToObjects(result).map((row) => row.name));
+
+  if (Array.isArray(tables) && tables.length > 0) {
+    const uniqueRequested = Array.from(new Set(tables));
+    return uniqueRequested.filter((name) => available.has(name));
+  }
+
+  return Array.from(available);
+}
+
+/**
+ * Convert a SQLite database into a JSON representation.
+ *
+ * The function accepts either a path to a SQLite database (Node.js only),
+ * or a binary representation of the database such as an ArrayBuffer or
+ * Uint8Array. It uses sql.js under the hood, loading the WebAssembly file
+ * either from a provided `locateFile` hook, the package-local wasm in Node.js,
+ * or the https://sql.js.org/dist/ CDN by default in browsers.
+ *
+ * @param {string|Uint8Array|ArrayBuffer} source - The SQLite database source.
+ * @param {Object} [options]
+ * @param {string[]} [options.tables] - Optional list of tables to extract.
+ * @param {(() => Promise<any>) | ((config: { locateFile?: (file: string) => string }) => Promise<any>)} [options.moduleLoader]
+ *   Custom loader. Can return a resolved sql.js module or the `initSqlJs` initializer.
+ * @param {(file: string) => string} [options.locateFile] - Custom locateFile hook passed to sql.js.
+ * @returns {Promise<Record<string, any[]>>} A JSON object keyed by table name.
+ */
+export async function sqliteToJson(source, options = {}) {
+  const { tables, moduleLoader, locateFile } = options;
+
+  if (typeof source === 'string') {
+    if (!isNode) {
+      throw new Error('Reading SQLite files by path is only supported in Node.js');
+    }
+    const fs = await import('fs/promises');
+    const fileData = await fs.readFile(source);
+    return sqliteToJson(new Uint8Array(fileData), options);
+  }
+
+  if (isSqlJsDatabase(source)) {
+    const tableNames = await fetchTableNames(source, tables);
+    const output = {};
+    for (const table of tableNames) {
+      const rows = source.exec(`SELECT * FROM "${sanitizeTableName(table)}";`);
+      output[table] = execToObjects(rows);
+    }
+    return output;
+  }
+
+  const normalized = normalizeSqliteInput(source);
+  if (!normalized) {
+    throw new TypeError('Unsupported SQLite input. Expected path, ArrayBuffer, Uint8Array, or sql.js Database instance.');
+  }
+
+  const sqlModule = await loadSqlJsInstance({ locateFile, moduleLoader });
+  if (!sqlModule || typeof sqlModule.Database !== 'function') {
+    throw new Error('sql.js module does not expose a Database constructor');
+  }
+
+  const database = new sqlModule.Database(normalized);
+  try {
+    const tableNames = await fetchTableNames(database, tables);
+    const output = {};
+    for (const table of tableNames) {
+      const rows = database.exec(`SELECT * FROM "${sanitizeTableName(table)}";`);
+      output[table] = execToObjects(rows);
+    }
+    return output;
+  } finally {
+    if (typeof database.close === 'function') {
+      database.close();
+    }
+  }
+}
+
 export { isNode, isBrowser };

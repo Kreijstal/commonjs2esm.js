@@ -145,6 +145,33 @@ the WebAssembly-powered `sql.js` package. You can pass custom loader functions
 through `options.nodeLoader` or `options.browserLoader` if you need to supply
 your own adapters.
 
+### `sqliteToJson(source, options)`
+
+Converts a SQLite database into a JSON object keyed by table name. It works in
+both Node.js and browsers by leveraging the `sql.js` WebAssembly build behind
+the scenes.
+
+```javascript
+import { sqliteToJson } from 'commonjs2esm';
+
+// From a file path (Node.js only)
+const jsonFromFile = await sqliteToJson('./data.db');
+
+// From a Uint8Array or ArrayBuffer (Node.js and browsers)
+const response = await fetch('/data.db');
+const arrayBuffer = await response.arrayBuffer();
+const jsonFromBuffer = await sqliteToJson(arrayBuffer);
+
+console.log(jsonFromBuffer.users);
+```
+
+You can limit the exported tables by providing `options.tables` (an array of
+table names) and customise the WebAssembly loader through
+`options.locateFile` or `options.moduleLoader` if you need to control where the
+`sql-wasm.wasm` asset is served from. In Node.js the default loader resolves
+the wasm bundled with the installed `sql.js` package, while browsers fall back
+to the public CDN unless you override the location.
+
 ### Environment Detection
 
 ```javascript
