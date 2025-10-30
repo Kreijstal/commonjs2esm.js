@@ -235,12 +235,22 @@ export async function sqliteToJson(source, options = {}) {
   const { tables, moduleLoader, locateFile } = options;
 
   if (typeof source === 'string') {
-    if (!isNode) {
-      throw new Error('Reading SQLite files by path is only supported in Node.js');
+    if (isNode) {
+      const fs = await import('fs/promises');
+      const fileData = await fs.readFile(source);
+      return sqliteToJson(new Uint8Array(fileData), options);
     }
-    const fs = await import('fs/promises');
-    const fileData = await fs.readFile(source);
-    return sqliteToJson(new Uint8Array(fileData), options);
+
+    if (typeof fetch === 'function') {
+      const response = await fetch(source);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch SQLite database from ${source}: ${response.status} ${response.statusText}`);
+      }
+      const fileData = await response.arrayBuffer();
+      return sqliteToJson(new Uint8Array(fileData), options);
+    }
+
+    throw new Error('Reading SQLite files by path requires filesystem access (Node.js) or fetch support (browsers).');
   }
 
   if (isSqlJsDatabase(source)) {

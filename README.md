@@ -154,7 +154,7 @@ the scenes.
 ```javascript
 import { sqliteToJson } from 'commonjs2esm';
 
-// From a file path (Node.js only)
+// From a file path (Node.js reads from disk, browsers fetch the URL)
 const jsonFromFile = await sqliteToJson('./data.db');
 
 // From a Uint8Array or ArrayBuffer (Node.js and browsers)
