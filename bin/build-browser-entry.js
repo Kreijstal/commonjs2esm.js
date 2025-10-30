@@ -42,6 +42,8 @@ async function buildBrowserEntry(targetDir) {
         'const __commonjsModule = { exports: {} };',
         'const __commonjsExports = __commonjsModule.exports;',
         '(function (module, exports) {',
+        '  const process = undefined;',
+        '  const require = undefined;',
         source,
         '})(__commonjsModule, __commonjsExports);',
         'const initSqlJs = __commonjsModule.exports.default ?? __commonjsModule.exports;',

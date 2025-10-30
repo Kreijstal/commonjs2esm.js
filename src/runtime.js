@@ -66,6 +66,83 @@ async function dynamicImport(specifier) {
   return import(specifier);
 }
 
+const SQL_JS_BLOCKED_GLOBALS = ['process', 'require'];
+
+async function withSqlJsCompatibleGlobals(callback) {
+  const snapshots = SQL_JS_BLOCKED_GLOBALS.map((key) => ({
+    key,
+    descriptor: Object.getOwnPropertyDescriptor(globalThis, key),
+    existed: key in globalThis,
+    value: globalThis[key],
+  }));
+
+  try {
+    for (const snapshot of snapshots) {
+      const { key, descriptor, existed } = snapshot;
+
+      if (descriptor) {
+        const { configurable, writable, set } = descriptor;
+        const canRedefine = configurable || writable || typeof set === 'function';
+        if (canRedefine) {
+          try {
+            Object.defineProperty(globalThis, key, {
+              configurable: true,
+              writable: true,
+              value: undefined,
+            });
+            continue;
+          } catch {
+            // fall through to assignment/delete handling below
+          }
+        }
+      }
+
+      if (existed) {
+        try {
+          globalThis[key] = undefined;
+        } catch {
+          try {
+            // Some environments expose read-only shims. Best effort removal.
+            delete globalThis[key];
+          } catch {
+            // Ignore – the sql.js loader will have to tolerate the existing value.
+          }
+        }
+      }
+    }
+
+    return await callback();
+  } finally {
+    for (const snapshot of snapshots.reverse()) {
+      const { key, descriptor, existed, value } = snapshot;
+
+      if (!existed) {
+        delete globalThis[key];
+        continue;
+      }
+
+      if (descriptor) {
+        try {
+          Object.defineProperty(globalThis, key, descriptor);
+          continue;
+        } catch {
+          // If redefining fails fall back to simple assignment below.
+        }
+      }
+
+      try {
+        globalThis[key] = value;
+      } catch {
+        // Ignore failures restoring – there's little we can do if reassignment is blocked.
+      }
+    }
+  }
+}
+
+async function importSqlJsModule(specifier) {
+  return await withSqlJsCompatibleGlobals(() => dynamicImport(specifier));
+}
+
 /**
  * Read a file from the filesystem (Node.js) or fetch from network (browser)
  * @param {string} filepath - Path to the file
@@ -197,7 +274,7 @@ async function resolveSqlJsSource() {
 
       if (localSqlJsModuleUrl) {
         try {
-          const imported = await dynamicImport(localSqlJsModuleUrl);
+          const imported = await importSqlJsModule(localSqlJsModuleUrl);
           const initSqlJs = imported?.default ?? imported;
           if (typeof initSqlJs !== 'function') {
             throw new Error('Local sql.js module does not export an initializer function');
@@ -215,7 +292,7 @@ async function resolveSqlJsSource() {
       }
 
       try {
-        const imported = await dynamicImport(cdnSqlJsModuleUrl);
+        const imported = await importSqlJsModule(cdnSqlJsModuleUrl);
         const initSqlJs = imported?.default ?? imported;
         if (typeof initSqlJs !== 'function') {
           throw new Error('CDN sql.js module does not export an initializer function');

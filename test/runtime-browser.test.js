@@ -62,6 +62,58 @@ test('loadSqliteModule prefers bundled sql.js assets in browser environments', a
   });
 });
 
+test('loadSqliteModule hides Node-like globals while importing bundled sql.js assets', async () => {
+  await withBrowserEnvironment(async ({ setImportHook }) => {
+    const seen = [];
+    const observedGlobals = [];
+
+    setImportHook(async (specifier) => {
+      seen.push(specifier);
+      if (specifier.endsWith('/sql-wasm.mjs')) {
+        observedGlobals.push({
+          processType: typeof globalThis.process,
+          requireType: typeof globalThis.require,
+        });
+        class SqlJsModule {}
+        return {
+          default: async () => ({ Database: SqlJsModule }),
+        };
+      }
+      throw new Error(`Unexpected import: ${specifier}`);
+    });
+
+    const originalProcess = globalThis.process;
+    const originalRequire = globalThis.require;
+
+    if (typeof originalRequire === 'undefined') {
+      globalThis.require = () => {
+        throw new Error('require should not be used during browser sql.js loading');
+      };
+    }
+
+    try {
+      const { loadSqliteModule } = await import(
+        `${RUNTIME_IMPORT}?browser-node-shim-${Date.now()}-${Math.random()}`,
+      );
+      const module = await loadSqliteModule();
+
+      assert.equal(seen.length, 1);
+      assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
+      assert.deepEqual(observedGlobals, [
+        { processType: 'undefined', requireType: 'undefined' },
+      ]);
+      assert.strictEqual(typeof module.Database, 'function');
+      assert.strictEqual(globalThis.process, originalProcess);
+    } finally {
+      if (typeof originalRequire === 'undefined') {
+        delete globalThis.require;
+      } else {
+        globalThis.require = originalRequire;
+      }
+    }
+  });
+});
+
 test('loadSqliteModule falls back to the CDN assets when the bundled files are unavailable', async () => {
   await withBrowserEnvironment(async ({ setImportHook }) => {
     const seen = [];
