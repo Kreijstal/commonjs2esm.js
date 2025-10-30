@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 import initSqlJs from 'sql.js';
@@ -81,8 +83,38 @@ test('sqliteToJson fetches SQLite files by path in browser environments', async 
   db.close();
 
   const previousEnv = globalThis.__COMMONJS2ESM_ENVIRONMENT;
-  const previousFetch = globalThis.fetch;
   const requested = [];
+
+  let port;
+
+  const server = createServer((req, res) => {
+    if (req.url === '/logs.db') {
+      const payload = Buffer.from(
+        binary.buffer,
+        binary.byteOffset,
+        binary.byteLength,
+      );
+      requested.push(`http://127.0.0.1:${port}${req.url}`);
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': payload.length,
+      });
+      res.end(payload);
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+
+  const address = server.address();
+  if (!address || typeof address !== 'object') {
+    throw new Error('Failed to obtain test server address');
+  }
+  port = address.port;
 
   let browserSqliteToJson;
 
@@ -92,12 +124,8 @@ test('sqliteToJson fetches SQLite files by path in browser environments', async 
       `../src/runtime.js?browser-test=${Date.now()}-${Math.random()}`
     ));
 
-    globalThis.fetch = async (input) => {
-      requested.push(input);
-      return new Response(binary);
-    };
-
-    const json = await browserSqliteToJson('https://example.com/logs.db', {
+    const databaseUrl = `http://127.0.0.1:${port}/logs.db`;
+    const json = await browserSqliteToJson(databaseUrl, {
       moduleLoader: async () => SQL,
     });
 
@@ -107,17 +135,13 @@ test('sqliteToJson fetches SQLite files by path in browser environments', async 
         { id: 2, message: 'Ready' },
       ],
     });
-    assert.deepEqual(requested, ['https://example.com/logs.db']);
+    assert.deepEqual(requested, [`http://127.0.0.1:${port}/logs.db`]);
   } finally {
+    await new Promise((resolve) => server.close(resolve));
     if (previousEnv === undefined) {
       delete globalThis.__COMMONJS2ESM_ENVIRONMENT;
     } else {
       globalThis.__COMMONJS2ESM_ENVIRONMENT = previousEnv;
-    }
-    if (previousFetch === undefined) {
-      delete globalThis.fetch;
-    } else {
-      globalThis.fetch = previousFetch;
     }
   }
 });
