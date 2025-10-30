@@ -8,7 +8,9 @@
     "commonjs2esm": "./bin/cli.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "npm run test:node && npm run test:playwright",
+    "test:node": "node --test test/*.test.js",
+    "test:playwright": "playwright test"
   },
   "keywords": [
     "commonjs",
@@ -21,5 +23,11 @@
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "sql.js": "^1.10.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0"
   }
 }

@@ -3,7 +3,15 @@
  */
 
 export { transformCommonJsToEsm, transformFile } from './transformer.js';
-export { readFile, writeFile, fileExists, isNode, isBrowser, loadSqliteModule } from './runtime.js';
+export {
+  readFile,
+  writeFile,
+  fileExists,
+  isNode,
+  isBrowser,
+  loadSqliteModule,
+  sqliteToJson,
+} from './runtime.js';
 
 export default {
   transformCommonJsToEsm: (await import('./transformer.js')).transformCommonJsToEsm,
@@ -14,4 +22,5 @@ export default {
   isNode: (await import('./runtime.js')).isNode,
   isBrowser: (await import('./runtime.js')).isBrowser,
   loadSqliteModule: (await import('./runtime.js')).loadSqliteModule,
+  sqliteToJson: (await import('./runtime.js')).sqliteToJson,
 };
