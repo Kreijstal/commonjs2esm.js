@@ -30,14 +30,21 @@ async function withBrowserEnvironment(callback) {
   }
 }
 
-test('loadSqliteModule loads sql.js from esm.sh in browser environments', async () => {
+test('loadSqliteModule loads the bundled sql.js assets in browser environments', async () => {
   await withBrowserEnvironment(async ({ setImportHook }) => {
     const seen = [];
+    let capturedLocateFile;
 
     setImportHook(async (specifier) => {
       seen.push(specifier);
-      if (specifier === 'https://esm.sh/sql.js') {
-        return { default: class SqlJsModule {} };
+      if (specifier.endsWith('/sql-wasm.mjs')) {
+        class SqlJsModule {}
+        return {
+          default: async (config = {}) => {
+            capturedLocateFile = config.locateFile;
+            return { Database: SqlJsModule };
+          },
+        };
       }
       throw new Error(`Unexpected import: ${specifier}`);
     });
@@ -48,18 +55,20 @@ test('loadSqliteModule loads sql.js from esm.sh in browser environments', async 
     const module = await loadSqliteModule();
 
     assert.equal(seen.length, 1);
-    assert.equal(seen[0], 'https://esm.sh/sql.js');
-    assert.strictEqual(typeof module, 'function');
+    assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
+    assert.ok(capturedLocateFile);
+    assert.match(capturedLocateFile('sql-wasm.wasm'), /sql-wasm\.wasm$/);
+    assert.strictEqual(typeof module.Database, 'function');
   });
 });
 
-test('sqliteToJson loads sql.js from esm.sh when given binary data in the browser', async () => {
+test('sqliteToJson loads sql.js from the bundled assets when given binary data in the browser', async () => {
   await withBrowserEnvironment(async ({ setImportHook }) => {
     const seen = [];
 
     setImportHook(async (specifier) => {
       seen.push(specifier);
-      if (specifier === 'https://esm.sh/sql.js') {
+      if (specifier.endsWith('/sql-wasm.mjs')) {
         class FakeDatabase {
           constructor() {
             this.closed = false;
@@ -85,7 +94,9 @@ test('sqliteToJson loads sql.js from esm.sh when given binary data in the browse
           }
         }
 
-        return { Database: FakeDatabase };
+        return {
+          default: async () => ({ Database: FakeDatabase }),
+        };
       }
       throw new Error(`Unexpected import: ${specifier}`);
     });
@@ -101,6 +112,7 @@ test('sqliteToJson loads sql.js from esm.sh when given binary data in the browse
         { id: 1, message: 'Boot' },
       ],
     });
-    assert.deepEqual(seen, ['https://esm.sh/sql.js']);
+    assert.equal(seen.length, 1);
+    assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
   });
 });

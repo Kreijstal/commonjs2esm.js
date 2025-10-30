@@ -11,9 +11,11 @@ const __dirname = dirname(__filename);
 const repositoryRoot = resolve(__dirname, '..');
 
 const destinations = [
-  { source: 'src/index.js', output: 'commonjs2esm.js', transform: true },
+  { source: 'src/index.js', output: 'commonjs2esm.js', transform: 'transformer' },
   { source: 'src/runtime.js', output: 'runtime.js', transform: false },
   { source: 'src/transformer.js', output: 'transformer.js', transform: false },
+  { source: 'node_modules/sql.js/dist/sql-wasm.js', output: 'sql-wasm.mjs', transform: 'wrap-sqljs' },
+  { source: 'node_modules/sql.js/dist/sql-wasm.wasm', output: 'sql-wasm.wasm', transform: false },
 ];
 
 async function buildBrowserEntry(targetDir) {
@@ -23,7 +25,7 @@ async function buildBrowserEntry(targetDir) {
     const sourcePath = resolve(repositoryRoot, entry.source);
     const outputPath = resolve(targetDir, entry.output);
 
-    if (entry.transform) {
+    if (entry.transform === 'transformer') {
       const source = await fs.readFile(sourcePath, 'utf-8');
       const transformed = transformCommonJsToEsm(source, {
         filename: entry.source,
@@ -31,6 +33,26 @@ async function buildBrowserEntry(targetDir) {
       });
       await fs.writeFile(outputPath, transformed, 'utf-8');
       console.log(`Generated ${entry.output}`);
+      continue;
+    }
+
+    if (entry.transform === 'wrap-sqljs') {
+      const source = await fs.readFile(sourcePath, 'utf-8');
+      const wrapped = [
+        'const __commonjsModule = { exports: {} };',
+        'const __commonjsExports = __commonjsModule.exports;',
+        '(function (module, exports) {',
+        source,
+        '})(__commonjsModule, __commonjsExports);',
+        'const initSqlJs = __commonjsModule.exports.default ?? __commonjsModule.exports;',
+        'if (typeof initSqlJs !== "function") {',
+        '  throw new Error("sql.js wrapper did not expose an initializer");',
+        '}',
+        'export default initSqlJs;',
+        '',
+      ].join('\n');
+      await fs.writeFile(outputPath, wrapped, 'utf-8');
+      console.log(`Wrapped ${entry.output}`);
       continue;
     }
 

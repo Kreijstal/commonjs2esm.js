@@ -248,8 +248,9 @@ npm run build:browser
 ```
 
 The command writes the browser-ready `commonjs2esm.js` together with the
-companion `runtime.js` and `transformer.js` files. Make sure all three are
-served so the module graph resolves correctly in the browser.
+companion `runtime.js`, `transformer.js`, `sql-wasm.mjs`, and `sql-wasm.wasm`
+files. Make sure the entire set is served so the module graph resolves and the
+SQLite WebAssembly binary can be fetched correctly in the browser.
 
 ### Serve the project locally for manual browser testing
 
@@ -264,9 +265,9 @@ npx http-server .
 
 Then open [`http://localhost:8080`](http://localhost:8080) in your browser and
 load a page that performs `import("./commonjs2esm.js")` to verify the runtime
-behaves as expected. The runtime automatically pulls `sql.js` from
-[`https://esm.sh`](https://esm.sh/) when running in the browser, so no
-additional bundling step is required.
+behaves as expected. The runtime consumes the generated `sql-wasm.mjs` wrapper
+and `sql-wasm.wasm` binary that live beside `runtime.js`, so ensure those files
+are reachable via HTTP alongside the entry modules.
 
 ## Testing
 

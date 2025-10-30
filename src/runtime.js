@@ -21,7 +21,38 @@ const isBrowser = environmentOverride === 'browser'
     : typeof window !== 'undefined' &&
       typeof window.document !== 'undefined';
 
-const SQL_JS_CDN_SPECIFIER = 'https://esm.sh/sql.js';
+const runtimeUrl = typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+
+let runtimeDirectoryUrl;
+try {
+  runtimeDirectoryUrl = runtimeUrl ? new URL('.', runtimeUrl).href : undefined;
+} catch {
+  runtimeDirectoryUrl = undefined;
+}
+
+const localSqlJsModuleUrl = (() => {
+  if (!runtimeDirectoryUrl) {
+    return undefined;
+  }
+  try {
+    return new URL('sql-wasm.mjs', runtimeDirectoryUrl).href;
+  } catch {
+    return undefined;
+  }
+})();
+
+const localSqlJsAssetsBaseUrl = (() => {
+  if (!localSqlJsModuleUrl) {
+    return undefined;
+  }
+  try {
+    return new URL('.', localSqlJsModuleUrl).href;
+  } catch {
+    return undefined;
+  }
+})();
+
+let cachedLocalSqlJsModulePromise;
 
 async function dynamicImport(specifier) {
   const hook = globalThis.__COMMONJS2ESM_IMPORT_HOOK__;
@@ -120,8 +151,7 @@ export async function loadSqliteModule(options = {}) {
     if (typeof browserLoader === 'function') {
       return await browserLoader();
     }
-    const module = await dynamicImport(SQL_JS_CDN_SPECIFIER);
-    return module?.default ?? module;
+    return await loadSqlJsInstance(options);
   }
 
   throw new Error('Unsupported environment for loadSqliteModule');
@@ -156,14 +186,35 @@ function normalizeSqliteInput(source) {
   return null;
 }
 
+async function importLocalSqlJsInitializer() {
+  if (!localSqlJsModuleUrl) {
+    throw new Error('sql-wasm.mjs could not be resolved relative to runtime.js');
+  }
+
+  try {
+    if (!cachedLocalSqlJsModulePromise) {
+      cachedLocalSqlJsModulePromise = dynamicImport(localSqlJsModuleUrl);
+    }
+    const imported = await cachedLocalSqlJsModulePromise;
+    const initSqlJs = imported?.default ?? imported;
+    if (typeof initSqlJs !== 'function') {
+      throw new Error('Local sql.js module does not export an initializer function');
+    }
+    return initSqlJs;
+  } catch (error) {
+    cachedLocalSqlJsModulePromise = undefined;
+    throw error;
+  }
+}
+
 async function loadSqlJsInstance(options = {}) {
   const { locateFile, moduleLoader } = options;
 
   const effectiveLocateFile =
     typeof locateFile === 'function'
       ? locateFile
-      : isBrowser
-        ? (file) => `https://sql.js.org/dist/${file}`
+      : isBrowser && localSqlJsAssetsBaseUrl
+        ? (file) => new URL(file, localSqlJsAssetsBaseUrl).href
         : undefined;
 
   const loaderConfig = effectiveLocateFile ? { locateFile: effectiveLocateFile } : undefined;
@@ -179,9 +230,22 @@ async function loadSqlJsInstance(options = {}) {
     return customModule;
   }
 
-  const imported = await dynamicImport(
-    isBrowser ? SQL_JS_CDN_SPECIFIER : 'sql.js',
-  );
+  if (isBrowser) {
+    try {
+      const initSqlJs = await importLocalSqlJsInitializer();
+      const config = loaderConfig ?? {};
+      return await initSqlJs(config);
+    } catch (error) {
+      const message = 'Unable to load sql.js for browser usage. Ensure sql-wasm.mjs and sql-wasm.wasm are served alongside runtime.js.';
+      if (error instanceof Error) {
+        error.message = `${message} ${error.message}`;
+        throw error;
+      }
+      throw new Error(message);
+    }
+  }
+
+  const imported = await dynamicImport('sql.js');
   const initSqlJs = imported.default ?? imported;
   if (initSqlJs && typeof initSqlJs.Database === 'function') {
     return initSqlJs;
@@ -233,7 +297,8 @@ async function fetchTableNames(database, tables) {
  * or a binary representation of the database such as an ArrayBuffer or
  * Uint8Array. It uses sql.js under the hood, loading the WebAssembly file
  * either from a provided `locateFile` hook, the package-local wasm in Node.js,
- * or the https://sql.js.org/dist/ CDN by default in browsers.
+ * or the `sql-wasm.mjs`/`sql-wasm.wasm` assets that ship with the browser
+ * bundle.
  *
  * @param {string|Uint8Array|ArrayBuffer} source - The SQLite database source.
  * @param {Object} [options]
