@@ -30,7 +30,7 @@ async function withBrowserEnvironment(callback) {
   }
 }
 
-test('loadSqliteModule loads the bundled sql.js assets in browser environments', async () => {
+test('loadSqliteModule prefers bundled sql.js assets in browser environments', async () => {
   await withBrowserEnvironment(async ({ setImportHook }) => {
     const seen = [];
     let capturedLocateFile;
@@ -62,7 +62,43 @@ test('loadSqliteModule loads the bundled sql.js assets in browser environments',
   });
 });
 
-test('sqliteToJson loads sql.js from the bundled assets when given binary data in the browser', async () => {
+test('loadSqliteModule falls back to the CDN assets when the bundled files are unavailable', async () => {
+  await withBrowserEnvironment(async ({ setImportHook }) => {
+    const seen = [];
+    let capturedLocateFile;
+
+    setImportHook(async (specifier) => {
+      seen.push(specifier);
+      if (specifier.endsWith('/sql-wasm.mjs')) {
+        throw new Error('Bundled asset missing');
+      }
+      if (specifier.includes('https://esm.sh/sql.js/dist/sql-wasm.js')) {
+        class SqlJsModule {}
+        return {
+          default: async (config = {}) => {
+            capturedLocateFile = config.locateFile;
+            return { Database: SqlJsModule };
+          },
+        };
+      }
+      throw new Error(`Unexpected import: ${specifier}`);
+    });
+
+    const { loadSqliteModule } = await import(
+      `${RUNTIME_IMPORT}?browser-cdn-fallback-${Date.now()}-${Math.random()}`
+    );
+    const module = await loadSqliteModule();
+
+    assert.equal(seen.length, 2);
+    assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
+    assert.ok(seen[1].includes('https://esm.sh/sql.js/dist/sql-wasm.js'));
+    assert.ok(capturedLocateFile);
+    assert.match(capturedLocateFile('sql-wasm.wasm'), /https:\/\/esm\.sh\/sql\.js\/dist\/sql-wasm\.wasm/);
+    assert.strictEqual(typeof module.Database, 'function');
+  });
+});
+
+test('sqliteToJson loads sql.js from the resolved assets when given binary data in the browser', async () => {
   await withBrowserEnvironment(async ({ setImportHook }) => {
     const seen = [];
 
@@ -112,7 +148,11 @@ test('sqliteToJson loads sql.js from the bundled assets when given binary data i
         { id: 1, message: 'Boot' },
       ],
     });
-    assert.equal(seen.length, 1);
-    assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
+    assert.ok(seen.length >= 1);
+    assert.ok(
+      seen.some((specifier) =>
+        specifier.endsWith('/sql-wasm.mjs') || specifier.includes('https://esm.sh/sql.js/dist/sql-wasm.js'),
+      ),
+    );
   });
 });

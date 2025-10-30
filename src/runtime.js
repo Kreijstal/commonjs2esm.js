@@ -52,7 +52,10 @@ const localSqlJsAssetsBaseUrl = (() => {
   }
 })();
 
-let cachedLocalSqlJsModulePromise;
+const cdnSqlJsBaseUrl = 'https://esm.sh/sql.js/dist/';
+const cdnSqlJsModuleUrl = `${cdnSqlJsBaseUrl}sql-wasm.js`;
+
+let cachedSqlJsSourcePromise;
 
 async function dynamicImport(specifier) {
   const hook = globalThis.__COMMONJS2ESM_IMPORT_HOOK__;
@@ -186,36 +189,76 @@ function normalizeSqliteInput(source) {
   return null;
 }
 
-async function importLocalSqlJsInitializer() {
-  if (!localSqlJsModuleUrl) {
-    throw new Error('sql-wasm.mjs could not be resolved relative to runtime.js');
+async function resolveSqlJsSource() {
+  if (!cachedSqlJsSourcePromise) {
+    cachedSqlJsSourcePromise = (async () => {
+      let lastError;
+
+      if (localSqlJsModuleUrl) {
+        try {
+          const imported = await dynamicImport(localSqlJsModuleUrl);
+          const initSqlJs = imported?.default ?? imported;
+          if (typeof initSqlJs !== 'function') {
+            throw new Error('Local sql.js module does not export an initializer function');
+          }
+          return {
+            initSqlJs,
+            assetBaseUrl: localSqlJsAssetsBaseUrl,
+            source: 'local',
+          };
+        } catch (error) {
+          const normalized = error instanceof Error ? error : new Error(String(error));
+          normalized.message = `Failed to load bundled sql.js assets: ${normalized.message}`;
+          lastError = normalized;
+        }
+      }
+
+      try {
+        const imported = await dynamicImport(cdnSqlJsModuleUrl);
+        const initSqlJs = imported?.default ?? imported;
+        if (typeof initSqlJs !== 'function') {
+          throw new Error('CDN sql.js module does not export an initializer function');
+        }
+        return {
+          initSqlJs,
+          assetBaseUrl: cdnSqlJsBaseUrl,
+          source: 'cdn',
+        };
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        if (lastError) {
+          normalized.message = `${normalized.message} (after ${lastError.message})`;
+        }
+        throw normalized;
+      }
+    })();
   }
 
-  try {
-    if (!cachedLocalSqlJsModulePromise) {
-      cachedLocalSqlJsModulePromise = dynamicImport(localSqlJsModuleUrl);
-    }
-    const imported = await cachedLocalSqlJsModulePromise;
-    const initSqlJs = imported?.default ?? imported;
-    if (typeof initSqlJs !== 'function') {
-      throw new Error('Local sql.js module does not export an initializer function');
-    }
-    return initSqlJs;
-  } catch (error) {
-    cachedLocalSqlJsModulePromise = undefined;
-    throw error;
+  const result = await cachedSqlJsSourcePromise;
+  if (!result || typeof result.initSqlJs !== 'function') {
+    throw new Error('Unable to resolve a sql.js initializer');
   }
+  return result;
 }
 
 async function loadSqlJsInstance(options = {}) {
   const { locateFile, moduleLoader } = options;
 
-  const effectiveLocateFile =
-    typeof locateFile === 'function'
-      ? locateFile
-      : isBrowser && localSqlJsAssetsBaseUrl
-        ? (file) => new URL(file, localSqlJsAssetsBaseUrl).href
-        : undefined;
+  let resolvedSource;
+  let effectiveLocateFile = typeof locateFile === 'function' ? locateFile : undefined;
+
+  if (!effectiveLocateFile && isBrowser) {
+    try {
+      resolvedSource = await resolveSqlJsSource();
+      if (resolvedSource.assetBaseUrl) {
+        effectiveLocateFile = (file) => new URL(file, resolvedSource.assetBaseUrl).href;
+      }
+    } catch (error) {
+      if (typeof moduleLoader !== 'function') {
+        throw error;
+      }
+    }
+  }
 
   const loaderConfig = effectiveLocateFile ? { locateFile: effectiveLocateFile } : undefined;
 
@@ -232,11 +275,11 @@ async function loadSqlJsInstance(options = {}) {
 
   if (isBrowser) {
     try {
-      const initSqlJs = await importLocalSqlJsInitializer();
+      const source = resolvedSource ?? await resolveSqlJsSource();
       const config = loaderConfig ?? {};
-      return await initSqlJs(config);
+      return await source.initSqlJs(config);
     } catch (error) {
-      const message = 'Unable to load sql.js for browser usage. Ensure sql-wasm.mjs and sql-wasm.wasm are served alongside runtime.js.';
+      const message = 'Unable to load sql.js for browser usage. Ensure sql-wasm assets are available locally or accessible via https://esm.sh/sql.js/dist/.';
       if (error instanceof Error) {
         error.message = `${message} ${error.message}`;
         throw error;
