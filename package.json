@@ -1,0 +1,25 @@
+{
+  "name": "commonjs2esm",
+  "version": "1.0.0",
+  "description": "Convert CommonJS modules to ESM for browser use with minimal bundling",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "commonjs2esm": "./bin/cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "commonjs",
+    "esm",
+    "modules",
+    "converter",
+    "browser"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

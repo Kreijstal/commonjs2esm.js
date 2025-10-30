@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>commonjs2esm.js - Browser Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #333;
+    }
+    .demo-section {
+      background: #f5f5f5;
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    code {
+      background: #e0e0e0;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+    }
+    pre {
+      background: #2d2d2d;
+      color: #f8f8f2;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    #output {
+      margin-top: 10px;
+      padding: 10px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      min-height: 50px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔄 commonjs2esm.js - Browser Demo</h1>
+  
+  <p>
+    This demo shows how the converted ESM modules work in the browser. 
+    The modules use runtime helpers that automatically adapt to the browser environment.
+  </p>
+
+  <div class="demo-section">
+    <h2>Demo: Cross-Platform File Reading</h2>
+    <p>
+      In Node.js, <code>readFile()</code> reads from the filesystem.
+      In the browser, it fetches via HTTP.
+    </p>
+    <button onclick="demoReadFile()">Test readFile()</button>
+    <div id="output"></div>
+  </div>
+
+  <div class="demo-section">
+    <h2>Environment Detection</h2>
+    <p>The runtime can detect which environment it's running in:</p>
+    <pre id="env-info">Loading...</pre>
+  </div>
+
+  <div class="demo-section">
+    <h2>How It Works</h2>
+    <p>
+      This page loads ESM modules that were converted from CommonJS.
+      External dependencies are loaded from <code>esm.sh</code> CDN,
+      so there's no bundling step required!
+    </p>
+  </div>
+
+  <script type="module">
+    import { isNode, isBrowser, readFile } from '../src/runtime.js';
+
+    // Display environment info
+    const envInfo = document.getElementById('env-info');
+    envInfo.textContent = `
+Environment Detection:
+- isNode: ${isNode}
+- isBrowser: ${isBrowser}
+- User Agent: ${navigator.userAgent}
+    `.trim();
+
+    // Make demoReadFile available globally
+    window.demoReadFile = async function() {
+      const output = document.getElementById('output');
+      output.innerHTML = '<em>Loading...</em>';
+      
+      try {
+        // Try to fetch package.json
+        const content = await readFile('../package.json');
+        const data = JSON.parse(content);
+        
+        output.innerHTML = `
+          <strong>✅ Successfully read package.json:</strong><br>
+          <code>Name: ${data.name}</code><br>
+          <code>Version: ${data.version}</code><br>
+          <code>Description: ${data.description}</code>
+        `;
+      } catch (error) {
+        output.innerHTML = `
+          <strong>❌ Error:</strong><br>
+          <code>${error.message}</code>
+        `;
+      }
+    };
+  </script>
+</body>
+</html>
