@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "bin": {
-    "commonjs2esm": "./bin/cli.js"
+    "commonjs2esm": "./bin/cli.js",
+    "commonjs2esm-create-db": "./bin/create-test-db.js"
   },
   "scripts": {
     "test": "npm run test:node && npm run test:playwright",

@@ -39,6 +39,20 @@ commonjs2esm mymodule.cjs
 # Creates: mymodule.esm.js
 ```
 
+#### Create a sample SQLite database fixture
+
+Generate the `logs.db` fixture that our Playwright tests consume (or supply
+your own file name):
+
+```bash
+commonjs2esm-create-db
+# or specify a custom name
+commonjs2esm-create-db my-fixture.db
+```
+
+The command writes the database to the current working directory and populates
+it with a `logs` table containing a few sample rows.
+
 ### Programmatic API
 
 ```javascript
@@ -154,7 +168,7 @@ the scenes.
 ```javascript
 import { sqliteToJson } from 'commonjs2esm';
 
-// From a file path (Node.js only)
+// From a file path (Node.js reads from disk, browsers fetch the URL)
 const jsonFromFile = await sqliteToJson('./data.db');
 
 // From a Uint8Array or ArrayBuffer (Node.js and browsers)
@@ -216,6 +230,37 @@ Check out the [browser demo](./examples/demo.html) to see the tool in action! Th
 - Working with ESM modules in the browser
 
 ![Browser Demo](https://github.com/user-attachments/assets/14491b2e-8fc7-4f07-b657-864ca3863197)
+
+### Generate a browser-friendly `commonjs2esm.js`
+
+If you want to exercise the library directly in the browser (for example via
+`import("./commonjs2esm.js")`), first materialise the entry module by running
+the CLI against the package's own source. From the repository root:
+
+```bash
+# Install dependencies if you haven't already
+npm install
+
+# Convert the ESM entrypoint to a single browser-loadable module
+npx commonjs2esm ./src/index.js ./commonjs2esm.js
+```
+
+The command writes `commonjs2esm.js` into the current directory so it can be
+served like any other static asset.
+
+### Serve the project locally for manual browser testing
+
+With `commonjs2esm.js` generated, start a static HTTP server from the project
+root. Any simple server works; for example, using Node's `http-server`
+utility:
+
+```bash
+npx http-server .
+```
+
+Then open [`http://localhost:8080`](http://localhost:8080) in your browser and
+load a page that performs `import("./commonjs2esm.js")` to verify the runtime
+behaves as expected.
 
 ## Testing
 
