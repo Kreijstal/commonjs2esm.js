@@ -52,8 +52,9 @@ const localSqlJsAssetsBaseUrl = (() => {
   }
 })();
 
-const cdnSqlJsBaseUrl = 'https://esm.sh/sql.js/dist/';
-const cdnSqlJsModuleUrl = `${cdnSqlJsBaseUrl}sql-wasm.js`;
+const sqlJsVersion = '1.10.3';
+const cdnSqlJsBaseUrl = `https://esm.sh/sql.js@${sqlJsVersion}/dist/`;
+const cdnSqlJsModuleUrl = `${cdnSqlJsBaseUrl}sql-wasm.js?target=es2022&deno`;
 
 let cachedSqlJsSourcePromise;
 

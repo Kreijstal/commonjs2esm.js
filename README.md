@@ -184,8 +184,8 @@ table names) and customise the WebAssembly loader through
 `options.locateFile` or `options.moduleLoader` if you need to control where the
 `sql-wasm.wasm` asset is served from. In Node.js the default loader resolves
 the wasm bundled with the installed `sql.js` package, while browsers fall back
-to the public CDN at `https://esm.sh/sql.js/dist/` unless you override the
-location.
+to the version-pinned CDN at `https://esm.sh/sql.js@1.10.3/dist/` (loading the
+module via `sql-wasm.js?target=es2022&deno`) unless you override the location.
 
 ### Environment Detection
 
@@ -253,7 +253,7 @@ companion `runtime.js`, `transformer.js`, `sql-wasm.mjs`, and `sql-wasm.wasm`
 files. Make sure the entire set is served so the module graph resolves and the
 SQLite WebAssembly binary can be fetched correctly in the browser. If you omit
 the wasm assets the runtime will automatically fall back to
-`https://esm.sh/sql.js/dist/sql-wasm.wasm`.
+`https://esm.sh/sql.js@1.10.3/dist/sql-wasm.wasm`.
 
 ### Serve the project locally for manual browser testing
 
@@ -270,8 +270,9 @@ Then open [`http://localhost:8080`](http://localhost:8080) in your browser and
 load a page that performs `import("./commonjs2esm.js")` to verify the runtime
 behaves as expected. The runtime consumes the generated `sql-wasm.mjs` wrapper
 and `sql-wasm.wasm` binary that live beside `runtime.js`; if they are not
-served, it will transparently fetch `sql.js` and its wasm payload from
-`https://esm.sh/sql.js/dist/` instead.
+served, it will transparently fetch `sql.js` via
+`https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?target=es2022&deno` and download
+the accompanying wasm from the same CDN.
 
 ## Testing
 
