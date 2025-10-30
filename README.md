@@ -39,6 +39,20 @@ commonjs2esm mymodule.cjs
 # Creates: mymodule.esm.js
 ```
 
+#### Create a sample SQLite database fixture
+
+Generate the `logs.db` fixture that our Playwright tests consume (or supply
+your own file name):
+
+```bash
+commonjs2esm-create-db
+# or specify a custom name
+commonjs2esm-create-db my-fixture.db
+```
+
+The command writes the database to the current working directory and populates
+it with a `logs` table containing a few sample rows.
+
 ### Programmatic API
 
 ```javascript
@@ -154,7 +168,7 @@ the scenes.
 ```javascript
 import { sqliteToJson } from 'commonjs2esm';
 
-// From a file path (Node.js only)
+// From a file path (Node.js reads from disk, browsers fetch the URL)
 const jsonFromFile = await sqliteToJson('./data.db');
 
 // From a Uint8Array or ArrayBuffer (Node.js and browsers)
@@ -170,7 +184,9 @@ table names) and customise the WebAssembly loader through
 `options.locateFile` or `options.moduleLoader` if you need to control where the
 `sql-wasm.wasm` asset is served from. In Node.js the default loader resolves
 the wasm bundled with the installed `sql.js` package, while browsers fall back
-to the public CDN unless you override the location.
+to the version-pinned CDN at `https://esm.sh/sql.js@1.10.3/dist/` (downloading
+the CommonJS bundle via `sql-wasm.js?raw` and wrapping it on the fly) unless you
+override the location.
 
 ### Environment Detection
 
@@ -216,6 +232,48 @@ Check out the [browser demo](./examples/demo.html) to see the tool in action! Th
 - Working with ESM modules in the browser
 
 ![Browser Demo](https://github.com/user-attachments/assets/14491b2e-8fc7-4f07-b657-864ca3863197)
+
+### Generate a browser-friendly `commonjs2esm.js`
+
+If you want to exercise the library directly in the browser (for example via
+`import("./commonjs2esm.js")`), use the helper CLI to materialise the entry
+module and its runtime dependencies in your current working directory:
+
+```bash
+# Install dependencies if you haven't already
+npm install
+
+# Generate commonjs2esm.js, runtime.js and transformer.js beside one another
+npx commonjs2esm-build-browser
+# Or, if you prefer an npm script
+npm run build:browser
+```
+
+The command writes the browser-ready `commonjs2esm.js` together with the
+companion `runtime.js`, `transformer.js`, `sql-wasm.mjs`, and `sql-wasm.wasm`
+files. Make sure the entire set is served so the module graph resolves and the
+SQLite WebAssembly binary can be fetched correctly in the browser. If you omit
+the wasm assets the runtime will automatically fall back to
+`https://esm.sh/sql.js@1.10.3/dist/sql-wasm.wasm`.
+
+### Serve the project locally for manual browser testing
+
+With the browser bundle generated, start a static HTTP server from the
+directory that now contains `commonjs2esm.js`, `runtime.js` and
+`transformer.js`. Any simple server works; for example, using Node's
+`http-server` utility from the project root after running the generator:
+
+```bash
+npx http-server .
+```
+
+Then open [`http://localhost:8080`](http://localhost:8080) in your browser and
+load a page that performs `import("./commonjs2esm.js")` to verify the runtime
+behaves as expected. The runtime consumes the generated `sql-wasm.mjs` wrapper
+and `sql-wasm.wasm` binary that live beside `runtime.js`; if they are not
+served, it will transparently fetch `sql.js` via
+`https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?raw` and download
+the accompanying wasm from the same CDN.
 
 ## Testing
 

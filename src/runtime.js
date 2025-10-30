@@ -21,6 +21,215 @@ const isBrowser = environmentOverride === 'browser'
     : typeof window !== 'undefined' &&
       typeof window.document !== 'undefined';
 
+const runtimeUrl = typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+
+let runtimeDirectoryUrl;
+try {
+  runtimeDirectoryUrl = runtimeUrl ? new URL('.', runtimeUrl).href : undefined;
+} catch {
+  runtimeDirectoryUrl = undefined;
+}
+
+const localSqlJsModuleUrl = (() => {
+  if (!runtimeDirectoryUrl) {
+    return undefined;
+  }
+  try {
+    return new URL('sql-wasm.mjs', runtimeDirectoryUrl).href;
+  } catch {
+    return undefined;
+  }
+})();
+
+const localSqlJsAssetsBaseUrl = (() => {
+  if (!localSqlJsModuleUrl) {
+    return undefined;
+  }
+  try {
+    return new URL('.', localSqlJsModuleUrl).href;
+  } catch {
+    return undefined;
+  }
+})();
+
+const sqlJsVersion = '1.10.3';
+const cdnSqlJsBaseUrl = `https://esm.sh/sql.js@${sqlJsVersion}/dist/`;
+const cdnSqlJsModuleRawUrl = `${cdnSqlJsBaseUrl}sql-wasm.js?raw`;
+
+let cachedSqlJsSourcePromise;
+
+async function dynamicImport(specifier) {
+  const hook = globalThis.__COMMONJS2ESM_IMPORT_HOOK__;
+  if (typeof hook === 'function') {
+    return await hook(specifier);
+  }
+  return import(specifier);
+}
+
+const SQL_JS_BLOCKED_GLOBALS = ['process', 'require'];
+
+async function withSqlJsCompatibleGlobals(callback) {
+  const snapshots = SQL_JS_BLOCKED_GLOBALS.map((key) => ({
+    key,
+    descriptor: Object.getOwnPropertyDescriptor(globalThis, key),
+    existed: key in globalThis,
+    value: globalThis[key],
+  }));
+
+  try {
+    for (const snapshot of snapshots) {
+      const { key, descriptor, existed } = snapshot;
+
+      if (descriptor) {
+        const { configurable, writable, set } = descriptor;
+        const canRedefine = configurable || writable || typeof set === 'function';
+        if (canRedefine) {
+          try {
+            Object.defineProperty(globalThis, key, {
+              configurable: true,
+              writable: true,
+              value: undefined,
+            });
+            continue;
+          } catch {
+            // fall through to assignment/delete handling below
+          }
+        }
+      }
+
+      if (existed) {
+        try {
+          globalThis[key] = undefined;
+        } catch {
+          try {
+            // Some environments expose read-only shims. Best effort removal.
+            delete globalThis[key];
+          } catch {
+            // Ignore – the sql.js loader will have to tolerate the existing value.
+          }
+        }
+      }
+    }
+
+    return await callback();
+  } finally {
+    for (const snapshot of snapshots.reverse()) {
+      const { key, descriptor, existed, value } = snapshot;
+
+      if (!existed) {
+        delete globalThis[key];
+        continue;
+      }
+
+      if (descriptor) {
+        try {
+          Object.defineProperty(globalThis, key, descriptor);
+          continue;
+        } catch {
+          // If redefining fails fall back to simple assignment below.
+        }
+      }
+
+      try {
+        globalThis[key] = value;
+      } catch {
+        // Ignore failures restoring – there's little we can do if reassignment is blocked.
+      }
+    }
+  }
+}
+
+async function importSqlJsModule(specifier) {
+  return await withSqlJsCompatibleGlobals(() => dynamicImport(specifier));
+}
+
+function wrapSqlJsCommonJsSource(source) {
+  return [
+    'const __commonjsModule = { exports: {} };',
+    'const __commonjsExports = __commonjsModule.exports;',
+    '(function (module, exports) {',
+    '  const process = undefined;',
+    '  const require = undefined;',
+    source,
+    '})(__commonjsModule, __commonjsExports);',
+    'const initSqlJs = __commonjsModule.exports.default ?? __commonjsModule.exports;',
+    'if (typeof initSqlJs !== "function") {',
+    '  throw new Error("sql.js wrapper did not expose an initializer");',
+    '}',
+    'export default initSqlJs;',
+    '',
+  ].join('\n');
+}
+
+function encodeModuleSourceToBase64(source) {
+  if (typeof btoa === 'function') {
+    try {
+      return btoa(unescape(encodeURIComponent(source)));
+    } catch {
+      // Fall through to Buffer handling below.
+    }
+  }
+
+  if (typeof Buffer !== 'undefined') {
+    try {
+      return Buffer.from(source, 'utf-8').toString('base64');
+    } catch {
+      // Fall through to error below.
+    }
+  }
+
+  throw new Error('Unable to base64 encode sql.js source for dynamic import.');
+}
+
+function createModuleUrlFromSource(source) {
+  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob === 'function') {
+    try {
+      const blob = new Blob([source], { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+      return {
+        url,
+        revoke() {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // Ignore revoke errors – the GC will eventually reclaim the blob.
+          }
+        },
+      };
+    } catch {
+      // Fall back to data URLs if blob creation fails.
+    }
+  }
+
+  const base64 = encodeModuleSourceToBase64(source);
+  return {
+    url: `data:text/javascript;base64,${base64}`,
+    revoke() {},
+  };
+}
+
+async function importSqlJsFromCdn() {
+  if (typeof fetch !== 'function') {
+    throw new Error('Global fetch is required to load sql.js from the CDN.');
+  }
+
+  const response = await fetch(cdnSqlJsModuleRawUrl);
+  if (!response || !response.ok) {
+    const message = response?.statusText || 'Unknown error';
+    throw new Error(`Failed to download sql.js from ${cdnSqlJsModuleRawUrl}: ${message}`);
+  }
+
+  const source = await response.text();
+  const wrapped = wrapSqlJsCommonJsSource(source);
+  const { url, revoke } = createModuleUrlFromSource(wrapped);
+
+  try {
+    return await importSqlJsModule(url);
+  } finally {
+    revoke();
+  }
+}
+
 /**
  * Read a file from the filesystem (Node.js) or fetch from network (browser)
  * @param {string} filepath - Path to the file
@@ -29,7 +238,7 @@ const isBrowser = environmentOverride === 'browser'
 export async function readFile(filepath) {
   if (isNode) {
     // In Node.js, read from filesystem
-    const fs = await import('fs/promises');
+    const fs = await dynamicImport('fs/promises');
     return await fs.readFile(filepath, 'utf-8');
   } else if (isBrowser) {
     // In browser, fetch from network
@@ -50,7 +259,7 @@ export async function readFile(filepath) {
  */
 export async function writeFile(filepath, content) {
   if (isNode) {
-    const fs = await import('fs/promises');
+    const fs = await dynamicImport('fs/promises');
     await fs.writeFile(filepath, content, 'utf-8');
   } else {
     throw new Error('writeFile is only supported in Node.js environment');
@@ -64,7 +273,7 @@ export async function writeFile(filepath, content) {
  */
 export async function fileExists(filepath) {
   if (isNode) {
-    const fs = await import('fs/promises');
+    const fs = await dynamicImport('fs/promises');
     try {
       await fs.access(filepath);
       return true;
@@ -102,7 +311,7 @@ export async function loadSqliteModule(options = {}) {
     if (typeof nodeLoader === 'function') {
       return await nodeLoader();
     }
-    const module = await import('sqlite3');
+    const module = await dynamicImport('sqlite3');
     return module?.default ?? module;
   }
 
@@ -110,8 +319,7 @@ export async function loadSqliteModule(options = {}) {
     if (typeof browserLoader === 'function') {
       return await browserLoader();
     }
-    const module = await import('sql.js');
-    return module?.default ?? module;
+    return await loadSqlJsInstance(options);
   }
 
   throw new Error('Unsupported environment for loadSqliteModule');
@@ -146,15 +354,76 @@ function normalizeSqliteInput(source) {
   return null;
 }
 
+async function resolveSqlJsSource() {
+  if (!cachedSqlJsSourcePromise) {
+    cachedSqlJsSourcePromise = (async () => {
+      let lastError;
+
+      if (localSqlJsModuleUrl) {
+        try {
+          const imported = await importSqlJsModule(localSqlJsModuleUrl);
+          const initSqlJs = imported?.default ?? imported;
+          if (typeof initSqlJs !== 'function') {
+            throw new Error('Local sql.js module does not export an initializer function');
+          }
+          return {
+            initSqlJs,
+            assetBaseUrl: localSqlJsAssetsBaseUrl,
+            source: 'local',
+          };
+        } catch (error) {
+          const normalized = error instanceof Error ? error : new Error(String(error));
+          normalized.message = `Failed to load bundled sql.js assets: ${normalized.message}`;
+          lastError = normalized;
+        }
+      }
+
+      try {
+        const imported = await importSqlJsFromCdn();
+        const initSqlJs = imported?.default ?? imported;
+        if (typeof initSqlJs !== 'function') {
+          throw new Error('CDN sql.js module does not export an initializer function');
+        }
+        return {
+          initSqlJs,
+          assetBaseUrl: cdnSqlJsBaseUrl,
+          source: 'cdn',
+        };
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        if (lastError) {
+          normalized.message = `${normalized.message} (after ${lastError.message})`;
+        }
+        throw normalized;
+      }
+    })();
+  }
+
+  const result = await cachedSqlJsSourcePromise;
+  if (!result || typeof result.initSqlJs !== 'function') {
+    throw new Error('Unable to resolve a sql.js initializer');
+  }
+  return result;
+}
+
 async function loadSqlJsInstance(options = {}) {
   const { locateFile, moduleLoader } = options;
 
-  const effectiveLocateFile =
-    typeof locateFile === 'function'
-      ? locateFile
-      : isBrowser
-        ? (file) => `https://sql.js.org/dist/${file}`
-        : undefined;
+  let resolvedSource;
+  let effectiveLocateFile = typeof locateFile === 'function' ? locateFile : undefined;
+
+  if (!effectiveLocateFile && isBrowser) {
+    try {
+      resolvedSource = await resolveSqlJsSource();
+      if (resolvedSource.assetBaseUrl) {
+        effectiveLocateFile = (file) => new URL(file, resolvedSource.assetBaseUrl).href;
+      }
+    } catch (error) {
+      if (typeof moduleLoader !== 'function') {
+        throw error;
+      }
+    }
+  }
 
   const loaderConfig = effectiveLocateFile ? { locateFile: effectiveLocateFile } : undefined;
 
@@ -169,7 +438,22 @@ async function loadSqlJsInstance(options = {}) {
     return customModule;
   }
 
-  const imported = await import('sql.js');
+  if (isBrowser) {
+    try {
+      const source = resolvedSource ?? await resolveSqlJsSource();
+      const config = loaderConfig ?? {};
+      return await source.initSqlJs(config);
+    } catch (error) {
+      const message = 'Unable to load sql.js for browser usage. Ensure sql-wasm assets are available locally or accessible via https://esm.sh/sql.js/dist/.';
+      if (error instanceof Error) {
+        error.message = `${message} ${error.message}`;
+        throw error;
+      }
+      throw new Error(message);
+    }
+  }
+
+  const imported = await dynamicImport('sql.js');
   const initSqlJs = imported.default ?? imported;
   if (initSqlJs && typeof initSqlJs.Database === 'function') {
     return initSqlJs;
@@ -221,7 +505,8 @@ async function fetchTableNames(database, tables) {
  * or a binary representation of the database such as an ArrayBuffer or
  * Uint8Array. It uses sql.js under the hood, loading the WebAssembly file
  * either from a provided `locateFile` hook, the package-local wasm in Node.js,
- * or the https://sql.js.org/dist/ CDN by default in browsers.
+ * or the `sql-wasm.mjs`/`sql-wasm.wasm` assets that ship with the browser
+ * bundle.
  *
  * @param {string|Uint8Array|ArrayBuffer} source - The SQLite database source.
  * @param {Object} [options]
@@ -235,12 +520,22 @@ export async function sqliteToJson(source, options = {}) {
   const { tables, moduleLoader, locateFile } = options;
 
   if (typeof source === 'string') {
-    if (!isNode) {
-      throw new Error('Reading SQLite files by path is only supported in Node.js');
+    if (isNode) {
+      const fs = await dynamicImport('fs/promises');
+      const fileData = await fs.readFile(source);
+      return sqliteToJson(new Uint8Array(fileData), options);
     }
-    const fs = await import('fs/promises');
-    const fileData = await fs.readFile(source);
-    return sqliteToJson(new Uint8Array(fileData), options);
+
+    if (typeof fetch === 'function') {
+      const response = await fetch(source);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch SQLite database from ${source}: ${response.status} ${response.statusText}`);
+      }
+      const fileData = await response.arrayBuffer();
+      return sqliteToJson(new Uint8Array(fileData), options);
+    }
+
+    throw new Error('Reading SQLite files by path requires filesystem access (Node.js) or fetch support (browsers).');
   }
 
   if (isSqlJsDatabase(source)) {
