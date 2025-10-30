@@ -168,7 +168,9 @@ console.log(jsonFromBuffer.users);
 You can limit the exported tables by providing `options.tables` (an array of
 table names) and customise the WebAssembly loader through
 `options.locateFile` or `options.moduleLoader` if you need to control where the
-`sql-wasm.wasm` asset is served from.
+`sql-wasm.wasm` asset is served from. In Node.js the default loader resolves
+the wasm bundled with the installed `sql.js` package, while browsers fall back
+to the public CDN unless you override the location.
 
 ### Environment Detection
 

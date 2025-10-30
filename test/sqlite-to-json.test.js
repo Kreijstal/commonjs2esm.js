@@ -20,6 +20,7 @@ test('sqliteToJson converts a Uint8Array database to JSON', async () => {
   db.run("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');");
 
   const binary = db.export();
+  db.close();
 
   const json = await sqliteToJson(binary, {
     moduleLoader: async () => SQL,
@@ -42,6 +43,7 @@ test('sqliteToJson filters tables when requested', async () => {
   db.run("INSERT INTO posts VALUES (1, 'First Post');");
 
   const binary = db.export();
+  db.close();
 
   const json = await sqliteToJson(binary, {
     tables: ['posts'],
@@ -50,5 +52,21 @@ test('sqliteToJson filters tables when requested', async () => {
 
   assert.deepEqual(json, {
     posts: [{ id: 1, title: 'First Post' }],
+  });
+});
+
+test('sqliteToJson loads sql.js defaults in Node.js', async () => {
+  const SQL = await createSqlModule();
+  const db = new SQL.Database();
+  db.run('CREATE TABLE settings (key TEXT, value TEXT);');
+  db.run("INSERT INTO settings VALUES ('theme', 'dark');");
+
+  const binary = db.export();
+  db.close();
+
+  const json = await sqliteToJson(binary);
+
+  assert.deepEqual(json, {
+    settings: [{ key: 'theme', value: 'dark' }],
   });
 });

@@ -128,7 +128,7 @@ function isSqlJsDatabase(value) {
 
 function normalizeSqliteInput(source) {
   if (source instanceof Uint8Array) {
-    return new Uint8Array(source);
+    return source;
   }
 
   if (source instanceof ArrayBuffer) {
@@ -149,25 +149,34 @@ function normalizeSqliteInput(source) {
 async function loadSqlJsInstance(options = {}) {
   const { locateFile, moduleLoader } = options;
 
+  const effectiveLocateFile =
+    typeof locateFile === 'function'
+      ? locateFile
+      : isBrowser
+        ? (file) => `https://sql.js.org/dist/${file}`
+        : undefined;
+
+  const loaderConfig = effectiveLocateFile ? { locateFile: effectiveLocateFile } : undefined;
+
   if (typeof moduleLoader === 'function') {
-    const customModule = await moduleLoader();
+    const customModule = await moduleLoader(loaderConfig);
     if (customModule && typeof customModule.Database === 'function') {
       return customModule;
     }
     if (typeof customModule === 'function') {
-      return await customModule({ locateFile });
+      return await customModule(loaderConfig ?? {});
     }
     return customModule;
   }
 
-  const initSqlJs = (await import('sql.js')).default;
+  const imported = await import('sql.js');
+  const initSqlJs = imported.default ?? imported;
   if (initSqlJs && typeof initSqlJs.Database === 'function') {
     return initSqlJs;
   }
   if (typeof initSqlJs === 'function') {
-    return await initSqlJs({
-      locateFile: locateFile || ((file) => `https://sql.js.org/dist/${file}`),
-    });
+    const config = loaderConfig ?? {};
+    return await initSqlJs(config);
   }
   throw new Error('Unable to load sql.js module');
 }
@@ -211,14 +220,14 @@ async function fetchTableNames(database, tables) {
  * The function accepts either a path to a SQLite database (Node.js only),
  * or a binary representation of the database such as an ArrayBuffer or
  * Uint8Array. It uses sql.js under the hood, loading the WebAssembly file
- * either from a provided `locateFile` hook or from the public CDN at
- * https://sql.js.org/dist/ by default.
+ * either from a provided `locateFile` hook, the package-local wasm in Node.js,
+ * or the https://sql.js.org/dist/ CDN by default in browsers.
  *
  * @param {string|Uint8Array|ArrayBuffer} source - The SQLite database source.
  * @param {Object} [options]
  * @param {string[]} [options.tables] - Optional list of tables to extract.
- * @param {(params: { locateFile?: (file: string) => string }) => Promise<any>|Promise<any>} [options.moduleLoader]
- *   Custom loader returning either the resolved sql.js module or the initializer.
+ * @param {(() => Promise<any>) | ((config: { locateFile?: (file: string) => string }) => Promise<any>)} [options.moduleLoader]
+ *   Custom loader. Can return a resolved sql.js module or the `initSqlJs` initializer.
  * @param {(file: string) => string} [options.locateFile] - Custom locateFile hook passed to sql.js.
  * @returns {Promise<Record<string, any[]>>} A JSON object keyed by table name.
  */

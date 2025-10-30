@@ -23,17 +23,20 @@ test('sqliteToJson reads SQLite files from disk in Node.js', async () => {
 
   const binary = db.export();
   const tempDir = await fs.mkdtemp(path.join(tmpdir(), 'sqlite-json-'));
-  const databasePath = path.join(tempDir, 'messages.db');
-  await fs.writeFile(databasePath, binary);
+  try {
+    const databasePath = path.join(tempDir, 'messages.db');
+    await fs.writeFile(databasePath, binary);
 
-  const json = await sqliteToJson(databasePath, {
-    moduleLoader: async () => SQL,
-  });
+    const json = await sqliteToJson(databasePath);
 
-  expect(json).toEqual({
-    messages: [
-      { id: 1, text: 'hello' },
-      { id: 2, text: 'world' },
-    ],
-  });
+    expect(json).toEqual({
+      messages: [
+        { id: 1, text: 'hello' },
+        { id: 2, text: 'world' },
+      ],
+    });
+  } finally {
+    db.close();
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
