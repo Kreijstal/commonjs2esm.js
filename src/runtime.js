@@ -54,7 +54,7 @@ const localSqlJsAssetsBaseUrl = (() => {
 
 const sqlJsVersion = '1.10.3';
 const cdnSqlJsBaseUrl = `https://esm.sh/sql.js@${sqlJsVersion}/dist/`;
-const cdnSqlJsModuleUrl = `${cdnSqlJsBaseUrl}sql-wasm.js?target=es2022&deno`;
+const cdnSqlJsModuleRawUrl = `${cdnSqlJsBaseUrl}sql-wasm.js?raw`;
 
 let cachedSqlJsSourcePromise;
 
@@ -141,6 +141,93 @@ async function withSqlJsCompatibleGlobals(callback) {
 
 async function importSqlJsModule(specifier) {
   return await withSqlJsCompatibleGlobals(() => dynamicImport(specifier));
+}
+
+function wrapSqlJsCommonJsSource(source) {
+  return [
+    'const __commonjsModule = { exports: {} };',
+    'const __commonjsExports = __commonjsModule.exports;',
+    '(function (module, exports) {',
+    '  const process = undefined;',
+    '  const require = undefined;',
+    source,
+    '})(__commonjsModule, __commonjsExports);',
+    'const initSqlJs = __commonjsModule.exports.default ?? __commonjsModule.exports;',
+    'if (typeof initSqlJs !== "function") {',
+    '  throw new Error("sql.js wrapper did not expose an initializer");',
+    '}',
+    'export default initSqlJs;',
+    '',
+  ].join('\n');
+}
+
+function encodeModuleSourceToBase64(source) {
+  if (typeof btoa === 'function') {
+    try {
+      return btoa(unescape(encodeURIComponent(source)));
+    } catch {
+      // Fall through to Buffer handling below.
+    }
+  }
+
+  if (typeof Buffer !== 'undefined') {
+    try {
+      return Buffer.from(source, 'utf-8').toString('base64');
+    } catch {
+      // Fall through to error below.
+    }
+  }
+
+  throw new Error('Unable to base64 encode sql.js source for dynamic import.');
+}
+
+function createModuleUrlFromSource(source) {
+  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob === 'function') {
+    try {
+      const blob = new Blob([source], { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+      return {
+        url,
+        revoke() {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // Ignore revoke errors – the GC will eventually reclaim the blob.
+          }
+        },
+      };
+    } catch {
+      // Fall back to data URLs if blob creation fails.
+    }
+  }
+
+  const base64 = encodeModuleSourceToBase64(source);
+  return {
+    url: `data:text/javascript;base64,${base64}`,
+    revoke() {},
+  };
+}
+
+async function importSqlJsFromCdn() {
+  if (typeof fetch !== 'function') {
+    throw new Error('Global fetch is required to load sql.js from the CDN.');
+  }
+
+  const response = await fetch(cdnSqlJsModuleRawUrl);
+  if (!response || !response.ok) {
+    const message = response?.statusText || 'Unknown error';
+    throw new Error(`Failed to download sql.js from ${cdnSqlJsModuleRawUrl}: ${message}`);
+  }
+
+  const source = await response.text();
+  const wrapped = wrapSqlJsCommonJsSource(source);
+  const { url, revoke } = createModuleUrlFromSource(wrapped);
+
+  try {
+    return await importSqlJsModule(url);
+  } finally {
+    revoke();
+  }
 }
 
 /**
@@ -292,7 +379,7 @@ async function resolveSqlJsSource() {
       }
 
       try {
-        const imported = await importSqlJsModule(cdnSqlJsModuleUrl);
+        const imported = await importSqlJsFromCdn();
         const initSqlJs = imported?.default ?? imported;
         if (typeof initSqlJs !== 'function') {
           throw new Error('CDN sql.js module does not export an initializer function');

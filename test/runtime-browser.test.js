@@ -117,6 +117,7 @@ test('loadSqliteModule hides Node-like globals while importing bundled sql.js as
 test('loadSqliteModule falls back to the CDN assets when the bundled files are unavailable', async () => {
   await withBrowserEnvironment(async ({ setImportHook }) => {
     const seen = [];
+    const fetched = [];
     let capturedLocateFile;
 
     setImportHook(async (specifier) => {
@@ -124,7 +125,7 @@ test('loadSqliteModule falls back to the CDN assets when the bundled files are u
       if (specifier.endsWith('/sql-wasm.mjs')) {
         throw new Error('Bundled asset missing');
       }
-      if (specifier.includes('https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?target=es2022&deno')) {
+      if (specifier.startsWith('data:text/javascript') || specifier.startsWith('blob:')) {
         class SqlJsModule {}
         return {
           default: async (config = {}) => {
@@ -136,20 +137,54 @@ test('loadSqliteModule falls back to the CDN assets when the bundled files are u
       throw new Error(`Unexpected import: ${specifier}`);
     });
 
-    const { loadSqliteModule } = await import(
-      `${RUNTIME_IMPORT}?browser-cdn-fallback-${Date.now()}-${Math.random()}`
-    );
-    const module = await loadSqliteModule();
+    const originalFetch = globalThis.fetch;
+    const moduleSource = [
+      'module.exports = async function initSqlJs(config = {}) {',
+      '  return { Database: class SqlJsModule {} };',
+      '};',
+    ].join('\n');
 
-    assert.equal(seen.length, 2);
-    assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
-    assert.ok(seen[1].includes('https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?target=es2022&deno'));
-    assert.ok(capturedLocateFile);
-    assert.match(
-      capturedLocateFile('sql-wasm.wasm'),
-      /https:\/\/esm\.sh\/sql\.js@1\.10\.3\/dist\/sql-wasm\.wasm/,
-    );
-    assert.strictEqual(typeof module.Database, 'function');
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      fetched.push(url);
+      if (url === 'https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?raw') {
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          async text() {
+            return moduleSource;
+          },
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    try {
+      const { loadSqliteModule } = await import(
+        `${RUNTIME_IMPORT}?browser-cdn-fallback-${Date.now()}-${Math.random()}`,
+      );
+      const module = await loadSqliteModule();
+
+      assert.equal(seen.length, 2);
+      assert.ok(seen[0].endsWith('/sql-wasm.mjs'));
+      assert.ok(
+        seen[1].startsWith('data:text/javascript') || seen[1].startsWith('blob:'),
+      );
+      assert.ok(capturedLocateFile);
+      assert.match(
+        capturedLocateFile('sql-wasm.wasm'),
+        /https:\/\/esm\.sh\/sql\.js@1\.10\.3\/dist\/sql-wasm\.wasm/,
+      );
+      assert.strictEqual(typeof module.Database, 'function');
+      assert.deepEqual(fetched, ['https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?raw']);
+    } finally {
+      if (originalFetch === undefined) {
+        delete globalThis.fetch;
+      } else {
+        globalThis.fetch = originalFetch;
+      }
+    }
   });
 });
 
@@ -207,7 +242,8 @@ test('sqliteToJson loads sql.js from the resolved assets when given binary data 
     assert.ok(
       seen.some((specifier) =>
         specifier.endsWith('/sql-wasm.mjs') ||
-        specifier.includes('https://esm.sh/sql.js@1.10.3/dist/sql-wasm.js?target=es2022&deno'),
+        specifier.startsWith('data:text/javascript') ||
+        specifier.startsWith('blob:'),
       ),
     );
   });
